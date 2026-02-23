@@ -103,8 +103,8 @@ describe("Instruction.resolve", () => {
     withFiles({ "AGENTS.md": "# Root Instructions", "src/file.ts": "const x = 1" }, (dir) =>
       Effect.gen(function* () {
         const svc = yield* Instruction.Service
-        const system = yield* svc.systemPaths()
-        expect(system.has(path.join(dir, "AGENTS.md"))).toBe(true)
+        const paths = yield* svc.systemPaths()
+        expect(paths.project.has(path.join(dir, "AGENTS.md"))).toBe(true)
 
         const results = yield* svc.resolve([], path.join(dir, "src", "file.ts"), MessageID.make("msg_message-test-1"))
         expect(results).toEqual([])
@@ -116,8 +116,8 @@ describe("Instruction.resolve", () => {
     withFiles({ "subdir/AGENTS.md": "# Subdir Instructions", "subdir/nested/file.ts": "const x = 1" }, (dir) =>
       Effect.gen(function* () {
         const svc = yield* Instruction.Service
-        const system = yield* svc.systemPaths()
-        expect(system.has(path.join(dir, "subdir", "AGENTS.md"))).toBe(false)
+        const paths = yield* svc.systemPaths()
+        expect(paths.project.has(path.join(dir, "subdir", "AGENTS.md"))).toBe(false)
 
         const results = yield* svc.resolve(
           [],
@@ -135,8 +135,8 @@ describe("Instruction.resolve", () => {
       Effect.gen(function* () {
         const svc = yield* Instruction.Service
         const filepath = path.join(dir, "subdir", "AGENTS.md")
-        const system = yield* svc.systemPaths()
-        expect(system.has(filepath)).toBe(false)
+        const paths = yield* svc.systemPaths()
+        expect(paths.project.has(filepath)).toBe(false)
 
         const results = yield* svc.resolve([], filepath, MessageID.make("msg_message-test-3"))
         expect(results).toEqual([])
@@ -205,13 +205,14 @@ describe("Instruction.system", () => {
       yield* Effect.gen(function* () {
         const svc = yield* Instruction.Service
         const paths = yield* svc.systemPaths()
-        expect(paths.has(path.join(projectTmp, "AGENTS.md"))).toBe(true)
-        expect(paths.has(path.join(globalTmp, "AGENTS.md"))).toBe(true)
+        expect(paths.project.has(path.join(projectTmp, "AGENTS.md"))).toBe(true)
+        expect(paths.global.has(path.join(globalTmp, "AGENTS.md"))).toBe(true)
 
         const rules = yield* svc.system()
-        expect(rules).toHaveLength(2)
-        expect(rules[0]).toBe(`Instructions from: ${path.join(globalTmp, "AGENTS.md")}\n# Global Instructions`)
-        expect(rules[1]).toBe(`Instructions from: ${path.join(projectTmp, "AGENTS.md")}\n# Project Instructions`)
+        expect(rules.global).toHaveLength(1)
+        expect(rules.project).toHaveLength(1)
+        expect(rules.global[0]).toBe(`Instructions from: ${path.join(globalTmp, "AGENTS.md")}\n# Global Instructions`)
+        expect(rules.project[0]).toBe(`Instructions from: ${path.join(projectTmp, "AGENTS.md")}\n# Project Instructions`)
       }).pipe(provideInstance(projectTmp), provideInstruction({ home: globalTmp, config: globalTmp }))
     }),
   )
@@ -226,7 +227,7 @@ describe("Instruction.systemPaths global config", () => {
       yield* Effect.gen(function* () {
         const svc = yield* Instruction.Service
         const paths = yield* svc.systemPaths()
-        expect(paths.has(path.join(globalTmp, "AGENTS.md"))).toBe(true)
+        expect(paths.global.has(path.join(globalTmp, "AGENTS.md"))).toBe(true)
       }).pipe(provideInstance(projectTmp), provideInstruction({ home: globalTmp, config: globalTmp }))
     }),
   )

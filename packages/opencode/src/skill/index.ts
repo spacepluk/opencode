@@ -40,6 +40,7 @@ export const Info = Schema.Struct({
   description: Schema.optional(Schema.String),
   location: Schema.String,
   content: Schema.String,
+  scope: Schema.optional(Schema.Union([Schema.Literal("global"), Schema.Literal("project")])),
 }).pipe(withStatics((s) => ({ zod: zod(s) })))
 export type Info = Schema.Schema.Type<typeof Info>
 
@@ -67,12 +68,12 @@ type State = {
 }
 
 type DiscoveryState = {
-  matches: string[]
+  matches: { path: string; scope: "global" | "project" }[]
   dirs: string[]
 }
 
 type ScanState = {
-  matches: Set<string>
+  matches: Map<string, "global" | "project">
   dirs: Set<string>
 }
 
@@ -83,7 +84,12 @@ export interface Interface {
   readonly available: (agent?: Agent.Info) => Effect.Effect<Info[]>
 }
 
-const add = Effect.fnUntraced(function* (state: State, match: string, bus: Bus.Interface) {
+const add = Effect.fnUntraced(function* (
+  state: State,
+  match: string,
+  bus: Bus.Interface,
+  scope: "global" | "project" = "project",
+) {
   const md = yield* Effect.tryPromise({
     try: () => ConfigMarkdown.parse(match),
     catch: (err) => err,
@@ -120,6 +126,7 @@ const add = Effect.fnUntraced(function* (state: State, match: string, bus: Bus.I
     description: parsed.data.description,
     location: match,
     content: md.content,
+    scope,
   }
 })
 
@@ -127,7 +134,7 @@ const scan = Effect.fnUntraced(function* (
   state: ScanState,
   root: string,
   pattern: string,
-  opts?: { dot?: boolean; scope?: string },
+  opts?: { dot?: boolean; scope?: "global" | "project" },
 ) {
   const matches = yield* Effect.tryPromise({
     try: () =>
@@ -148,7 +155,7 @@ const scan = Effect.fnUntraced(function* (
   )
 
   for (const match of matches) {
-    state.matches.add(match)
+    state.matches.set(match, opts?.scope ?? "project")
     state.dirs.add(path.dirname(match))
   }
 })
@@ -161,7 +168,7 @@ const discoverSkills = Effect.fnUntraced(function* (
   directory: string,
   worktree: string,
 ) {
-  const state: ScanState = { matches: new Set(), dirs: new Set() }
+  const state: ScanState = { matches: new Map(), dirs: new Set() }
 
   const externalDirs: string[] = []
   if (!Flag.OPENCODE_DISABLE_EXTERNAL_SKILLS) {
@@ -185,7 +192,7 @@ const discoverSkills = Effect.fnUntraced(function* (
 
   const configDirs = yield* config.directories()
   for (const dir of configDirs) {
-    yield* scan(state, dir, OPENCODE_SKILL_PATTERN)
+    yield* scan(state, dir, OPENCODE_SKILL_PATTERN, { scope: "global" })
   }
 
   const cfg = yield* config.get()
@@ -197,27 +204,35 @@ const discoverSkills = Effect.fnUntraced(function* (
       continue
     }
 
-    yield* scan(state, dir, SKILL_PATTERN)
+    yield* scan(state, dir, SKILL_PATTERN, { scope: "global" })
   }
 
   for (const url of cfg.skills?.urls ?? []) {
     const pulledDirs = yield* discovery.pull(url)
     for (const dir of pulledDirs) {
-      yield* scan(state, dir, SKILL_PATTERN)
+      yield* scan(state, dir, SKILL_PATTERN, { scope: "global" })
     }
   }
 
   return {
-    matches: Array.from(state.matches),
+    matches: Array.from(state.matches, ([p, scope]) => ({ path: p, scope })),
     dirs: Array.from(state.dirs),
   }
 })
 
-const loadSkills = Effect.fnUntraced(function* (state: State, discovered: DiscoveryState, bus: Bus.Interface) {
-  yield* Effect.forEach(discovered.matches, (match) => add(state, match, bus), {
-    concurrency: "unbounded",
-    discard: true,
-  })
+const loadSkills = Effect.fnUntraced(function* (
+  state: State,
+  discovered: DiscoveryState,
+  bus: Bus.Interface,
+) {
+  yield* Effect.forEach(
+    discovered.matches,
+    (match) => add(state, match.path, bus, match.scope),
+    {
+      concurrency: "unbounded",
+      discard: true,
+    },
+  )
 
   log.info("init", { count: Object.keys(state.skills).length })
 })

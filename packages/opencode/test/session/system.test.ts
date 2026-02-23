@@ -55,15 +55,15 @@ describe("session.system", () => {
   it.effect("skills output is sorted by name and stable across calls", () =>
     Effect.gen(function* () {
       const prompt = yield* SystemPrompt.Service
-      const first = yield* prompt.skills(build)
+      const result = yield* prompt.skills(build)
       const second = yield* prompt.skills(build)
-      const output = first ?? (yield* Effect.fail(new NamedError.Unknown({ message: "missing skills output" })))
 
-      expect(first).toBe(second)
+      expect(result).toEqual(second)
 
-      const alpha = output.indexOf("<name>alpha-skill</name>")
-      const middle = output.indexOf("<name>middle-skill</name>")
-      const zeta = output.indexOf("<name>zeta-skill</name>")
+      const combined = [result.global, result.project].filter(Boolean).join("\n")
+      const alpha = combined.indexOf("<name>alpha-skill</name>")
+      const middle = combined.indexOf("<name>middle-skill</name>")
+      const zeta = combined.indexOf("<name>zeta-skill</name>")
 
       expect(alpha).toBeGreaterThan(-1)
       expect(middle).toBeGreaterThan(alpha)

@@ -1299,6 +1299,17 @@ function UserMessage(props: {
             flexShrink={0}
           >
             <text fg={theme.text}>{text()}</text>
+            <For each={props.parts.filter((x) => x.type === "text" && !x.synthetic)}>
+              {(part) => (
+                <TuiPluginRuntime.Slot
+                  name="message_part_after"
+                  session_id={props.message.sessionID}
+                  message_id={props.message.id}
+                  part_id={part.id}
+                  part_type="text"
+                />
+              )}
+            </For>
             <Show when={files().length}>
               <box flexDirection="row" paddingBottom={metadataVisible() ? 1 : 0} paddingTop={1} gap={1} flexWrap="wrap">
                 <For each={files()}>
@@ -1475,6 +1486,13 @@ function ReasoningPart(props: { last: boolean; part: ReasoningPart; message: Ass
           conceal={ctx.conceal()}
           fg={theme.textMuted}
         />
+        <TuiPluginRuntime.Slot
+          name="message_part_after"
+          session_id={props.message.sessionID}
+          message_id={props.message.id}
+          part_id={props.part.id}
+          part_type="reasoning"
+        />
       </box>
     </Show>
   )
@@ -1509,6 +1527,13 @@ function TextPart(props: { last: boolean; part: TextPart; message: AssistantMess
             />
           </Match>
         </Switch>
+        <TuiPluginRuntime.Slot
+          name="message_part_after"
+          session_id={props.message.sessionID}
+          message_id={props.message.id}
+          part_id={props.part.id}
+          part_type="text"
+        />
       </box>
     </Show>
   )

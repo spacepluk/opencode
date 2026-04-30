@@ -360,7 +360,7 @@ You can configure the providers and models you want to use in your OpenCode conf
 
 The `small_model` option configures a separate model for lightweight tasks like title generation. By default, OpenCode tries to use a cheaper model if one is available from your provider, otherwise it falls back to your main model.
 
-Provider options can include `timeout`, `chunkTimeout`, and `setCacheKey`:
+Provider options can include `timeout`, `chunkTimeout`, `setCacheKey`, and `cacheTtl`:
 
 ```json title="opencode.json"
 {
@@ -370,7 +370,8 @@ Provider options can include `timeout`, `chunkTimeout`, and `setCacheKey`:
       "options": {
         "timeout": 600000,
         "chunkTimeout": 30000,
-        "setCacheKey": true
+        "setCacheKey": true,
+        "cacheTtl": "1h"
       }
     }
   }
@@ -380,6 +381,7 @@ Provider options can include `timeout`, `chunkTimeout`, and `setCacheKey`:
 - `timeout` - Request timeout in milliseconds (default: 300000). Set to `false` to disable.
 - `chunkTimeout` - Timeout in milliseconds between streamed response chunks. If no chunk arrives in time, the request is aborted.
 - `setCacheKey` - Ensure a cache key is always set for designated provider.
+- `cacheTtl` - TTL for Anthropic-style prompt cache breakpoints. Either `"5m"` (default) or `"1h"`. The 1-hour cache costs 2× base input tokens on writes (vs 1.25× for 5m) but extends cache lifetime, which helps when you have gaps longer than 5 minutes between requests. Can be overridden per-shell with the `ENABLE_PROMPT_CACHING_1H` environment variable, or forced back to 5m with `FORCE_PROMPT_CACHING_5M`.
 
 You can also configure [local models](/docs/models#local). [Learn more](/docs/models).
 

@@ -251,16 +251,30 @@ function normalizeMessages(
   return msgs
 }
 
-function applyCaching(msgs: ModelMessage[], model: Provider.Model): ModelMessage[] {
+function resolveCacheTtl(options: Record<string, unknown>): "1h" | undefined {
+  if (process.env["FORCE_PROMPT_CACHING_5M"]) return undefined
+  if (process.env["ENABLE_PROMPT_CACHING_1H"]) return "1h"
+  if (options["cacheTtl"] === "1h") return "1h"
+  return undefined
+}
+
+function applyCaching(
+  msgs: ModelMessage[],
+  model: Provider.Model,
+  options: Record<string, unknown>,
+): ModelMessage[] {
   const system = msgs.filter((msg) => msg.role === "system").slice(0, 2)
   const final = msgs.filter((msg) => msg.role !== "system").slice(-2)
 
+  const ttl = resolveCacheTtl(options)
+  const cacheControl = ttl ? { type: "ephemeral", ttl } : { type: "ephemeral" }
+
   const providerOptions = {
     anthropic: {
-      cacheControl: { type: "ephemeral" },
+      cacheControl,
     },
     openrouter: {
-      cacheControl: { type: "ephemeral" },
+      cacheControl,
     },
     bedrock: {
       cachePoint: { type: "default" },
@@ -354,7 +368,7 @@ export function message(msgs: ModelMessage[], model: Provider.Model, options: Re
       model.api.npm === "@ai-sdk/alibaba") &&
     model.api.npm !== "@ai-sdk/gateway"
   ) {
-    msgs = applyCaching(msgs, model)
+    msgs = applyCaching(msgs, model, options)
   }
 
   // Remap providerOptions keys from stored providerID to expected SDK key
@@ -981,6 +995,10 @@ export function options(input: {
     result["gateway"] = {
       caching: "auto",
     }
+  }
+
+  if (input.providerOptions?.cacheTtl) {
+    result["cacheTtl"] = input.providerOptions.cacheTtl
   }
 
   return result

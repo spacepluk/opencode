@@ -87,6 +87,10 @@ export const Info = Schema.Struct({
         setCacheKey: Schema.optional(Schema.Boolean).annotate({
           description: "Enable promptCacheKey for this provider (default false)",
         }),
+        cacheTtl: Schema.optional(Schema.Literals(["5m", "1h"])).annotate({
+          description:
+            "TTL for Anthropic-style prompt cache breakpoints. '1h' costs 2× base input on writes (vs 1.25× for '5m') but extends cache lifetime. Default '5m'. Overridden by ENABLE_PROMPT_CACHING_1H / FORCE_PROMPT_CACHING_5M env vars.",
+        }),
         timeout: Schema.optional(
           Schema.Union([PositiveInt, Schema.Literal(false)]).annotate({
             description:

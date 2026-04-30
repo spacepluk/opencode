@@ -3331,3 +3331,171 @@ describe("ProviderTransform.variants", () => {
     })
   })
 })
+
+describe("ProviderTransform.message - anthropic cache TTL", () => {
+  const anthropicModel = {
+    id: "anthropic/claude-sonnet-4-5",
+    providerID: "anthropic",
+    api: {
+      id: "claude-sonnet-4-5",
+      url: "https://api.anthropic.com",
+      npm: "@ai-sdk/anthropic",
+    },
+    name: "Claude Sonnet 4.5",
+    capabilities: {
+      temperature: true,
+      reasoning: false,
+      attachment: true,
+      toolcall: true,
+      input: { text: true, audio: false, image: true, video: false, pdf: true },
+      output: { text: true, audio: false, image: false, video: false, pdf: false },
+      interleaved: false,
+    },
+    cost: { input: 0.003, output: 0.015, cache: { read: 0.0003, write: 0.00375 } },
+    limit: { context: 200000, output: 8192 },
+    status: "active",
+    options: {},
+    headers: {},
+    release_date: "2025-01-01",
+  } as any
+
+  const baseMsgs = () =>
+    [
+      { role: "system", content: "You are helpful." },
+      { role: "user", content: "Hello" },
+      { role: "assistant", content: "Hi" },
+      { role: "user", content: "How are you?" },
+    ] as any[]
+
+  const lastFinal = (result: any[]) => result[result.length - 1]
+
+  const restoreEnv = (key: string, prev: string | undefined) => {
+    if (prev === undefined) delete process.env[key]
+    else process.env[key] = prev
+  }
+
+  test("default emits ephemeral cacheControl without ttl", () => {
+    const prev1h = process.env["ENABLE_PROMPT_CACHING_1H"]
+    const prev5m = process.env["FORCE_PROMPT_CACHING_5M"]
+    delete process.env["ENABLE_PROMPT_CACHING_1H"]
+    delete process.env["FORCE_PROMPT_CACHING_5M"]
+    try {
+      const result = ProviderTransform.message(baseMsgs(), anthropicModel, {}) as any[]
+      expect(lastFinal(result).providerOptions?.anthropic?.cacheControl).toEqual({
+        type: "ephemeral",
+      })
+    } finally {
+      restoreEnv("ENABLE_PROMPT_CACHING_1H", prev1h)
+      restoreEnv("FORCE_PROMPT_CACHING_5M", prev5m)
+    }
+  })
+
+  test("ENABLE_PROMPT_CACHING_1H sets ttl=1h", () => {
+    const prev1h = process.env["ENABLE_PROMPT_CACHING_1H"]
+    const prev5m = process.env["FORCE_PROMPT_CACHING_5M"]
+    process.env["ENABLE_PROMPT_CACHING_1H"] = "1"
+    delete process.env["FORCE_PROMPT_CACHING_5M"]
+    try {
+      const result = ProviderTransform.message(baseMsgs(), anthropicModel, {}) as any[]
+      expect(lastFinal(result).providerOptions?.anthropic?.cacheControl).toEqual({
+        type: "ephemeral",
+        ttl: "1h",
+      })
+    } finally {
+      restoreEnv("ENABLE_PROMPT_CACHING_1H", prev1h)
+      restoreEnv("FORCE_PROMPT_CACHING_5M", prev5m)
+    }
+  })
+
+  test("FORCE_PROMPT_CACHING_5M overrides ENABLE_PROMPT_CACHING_1H", () => {
+    const prev1h = process.env["ENABLE_PROMPT_CACHING_1H"]
+    const prev5m = process.env["FORCE_PROMPT_CACHING_5M"]
+    process.env["ENABLE_PROMPT_CACHING_1H"] = "1"
+    process.env["FORCE_PROMPT_CACHING_5M"] = "1"
+    try {
+      const result = ProviderTransform.message(baseMsgs(), anthropicModel, {}) as any[]
+      expect(lastFinal(result).providerOptions?.anthropic?.cacheControl).toEqual({
+        type: "ephemeral",
+      })
+    } finally {
+      restoreEnv("ENABLE_PROMPT_CACHING_1H", prev1h)
+      restoreEnv("FORCE_PROMPT_CACHING_5M", prev5m)
+    }
+  })
+
+  test("options.cacheTtl='1h' sets ttl=1h", () => {
+    const prev1h = process.env["ENABLE_PROMPT_CACHING_1H"]
+    const prev5m = process.env["FORCE_PROMPT_CACHING_5M"]
+    delete process.env["ENABLE_PROMPT_CACHING_1H"]
+    delete process.env["FORCE_PROMPT_CACHING_5M"]
+    try {
+      const result = ProviderTransform.message(baseMsgs(), anthropicModel, { cacheTtl: "1h" }) as any[]
+      expect(lastFinal(result).providerOptions?.anthropic?.cacheControl).toEqual({
+        type: "ephemeral",
+        ttl: "1h",
+      })
+    } finally {
+      restoreEnv("ENABLE_PROMPT_CACHING_1H", prev1h)
+      restoreEnv("FORCE_PROMPT_CACHING_5M", prev5m)
+    }
+  })
+
+  test("options.cacheTtl='5m' leaves ttl unset", () => {
+    const prev1h = process.env["ENABLE_PROMPT_CACHING_1H"]
+    const prev5m = process.env["FORCE_PROMPT_CACHING_5M"]
+    delete process.env["ENABLE_PROMPT_CACHING_1H"]
+    delete process.env["FORCE_PROMPT_CACHING_5M"]
+    try {
+      const result = ProviderTransform.message(baseMsgs(), anthropicModel, { cacheTtl: "5m" }) as any[]
+      expect(lastFinal(result).providerOptions?.anthropic?.cacheControl).toEqual({
+        type: "ephemeral",
+      })
+    } finally {
+      restoreEnv("ENABLE_PROMPT_CACHING_1H", prev1h)
+      restoreEnv("FORCE_PROMPT_CACHING_5M", prev5m)
+    }
+  })
+
+  test("FORCE_PROMPT_CACHING_5M overrides options.cacheTtl='1h'", () => {
+    const prev1h = process.env["ENABLE_PROMPT_CACHING_1H"]
+    const prev5m = process.env["FORCE_PROMPT_CACHING_5M"]
+    delete process.env["ENABLE_PROMPT_CACHING_1H"]
+    process.env["FORCE_PROMPT_CACHING_5M"] = "1"
+    try {
+      const result = ProviderTransform.message(baseMsgs(), anthropicModel, { cacheTtl: "1h" }) as any[]
+      expect(lastFinal(result).providerOptions?.anthropic?.cacheControl).toEqual({
+        type: "ephemeral",
+      })
+    } finally {
+      restoreEnv("ENABLE_PROMPT_CACHING_1H", prev1h)
+      restoreEnv("FORCE_PROMPT_CACHING_5M", prev5m)
+    }
+  })
+
+  test("provider-level options.cacheTtl='1h' propagates through ProviderTransform.options", () => {
+    const prev1h = process.env["ENABLE_PROMPT_CACHING_1H"]
+    const prev5m = process.env["FORCE_PROMPT_CACHING_5M"]
+    delete process.env["ENABLE_PROMPT_CACHING_1H"]
+    delete process.env["FORCE_PROMPT_CACHING_5M"]
+    try {
+      // Mirrors session/llm.ts: provider-level options come in via providerOptions,
+      // ProviderTransform.options must surface cacheTtl into the merged options map
+      // so applyCaching's resolveCacheTtl can read it.
+      const merged = ProviderTransform.options({
+        model: anthropicModel,
+        sessionID: "test-session",
+        providerOptions: { cacheTtl: "1h" },
+      })
+      expect(merged["cacheTtl"]).toEqual("1h")
+
+      const result = ProviderTransform.message(baseMsgs(), anthropicModel, merged) as any[]
+      expect(lastFinal(result).providerOptions?.anthropic?.cacheControl).toEqual({
+        type: "ephemeral",
+        ttl: "1h",
+      })
+    } finally {
+      restoreEnv("ENABLE_PROMPT_CACHING_1H", prev1h)
+      restoreEnv("FORCE_PROMPT_CACHING_5M", prev5m)
+    }
+  })
+})

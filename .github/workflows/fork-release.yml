@@ -1,0 +1,80 @@
+name: Series Release
+
+on:
+  push:
+    branches:
+      - series
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Determine version
+        id: version
+        run: |
+          UPSTREAM=$(jq -r .version packages/opencode/package.json)
+          echo "upstream=${UPSTREAM}" >> "$GITHUB_OUTPUT"
+          echo "full=${UPSTREAM}-series" >> "$GITHUB_OUTPUT"
+          echo "tag=v${UPSTREAM}-series" >> "$GITHUB_OUTPUT"
+
+      - name: Build all platforms
+        run: bun ./packages/opencode/script/build.ts
+        env:
+          OPENCODE_VERSION: ${{ steps.version.outputs.full }}
+
+      - name: Package release archives
+        working-directory: packages/opencode/dist
+        run: |
+          for dir in opencode-linux-*; do
+            [ -d "$dir" ] || continue
+            tar -czf "../../../${dir}.tar.gz" -C "${dir}/bin" .
+          done
+          for dir in opencode-darwin-* opencode-windows-*; do
+            [ -d "$dir" ] || continue
+            (cd "${dir}/bin" && zip -r "../../../../${dir}.zip" .)
+          done
+
+      - name: Versioned release (${{ steps.version.outputs.tag }})
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          git tag -f "${TAG}"
+          git push -f origin "${TAG}"
+          gh release create "${TAG}" \
+            --title "${TAG}" \
+            --notes "Series fork of opencode ${{ steps.version.outputs.upstream }} with image rendering support." \
+            2>/dev/null || true
+          gh release upload "${TAG}" \
+            packages/opencode/dist/*.tar.gz \
+            packages/opencode/dist/*.zip \
+            --clobber
+
+      - name: Rolling release (series-latest)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git tag -f series-latest
+          git push -f origin series-latest
+          gh release create series-latest \
+            --title "series-latest" \
+            --notes "Latest series fork build (currently ${{ steps.version.outputs.full }})." \
+            --latest \
+            2>/dev/null || true
+          gh release upload series-latest \
+            packages/opencode/dist/*.tar.gz \
+            packages/opencode/dist/*.zip \
+            --clobber

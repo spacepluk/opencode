@@ -36,16 +36,18 @@ jobs:
           OPENCODE_VERSION: ${{ steps.version.outputs.full }}
 
       - name: Package release archives
-        working-directory: packages/opencode/dist
         run: |
+          mkdir -p release-archives
+          cd packages/opencode/dist
           for dir in opencode-linux-*; do
             [ -d "$dir" ] || continue
-            tar -czf "../../../${dir}.tar.gz" -C "${dir}/bin" .
+            tar -czf "../../../release-archives/${dir}.tar.gz" -C "${dir}/bin" .
           done
           for dir in opencode-darwin-* opencode-windows-*; do
             [ -d "$dir" ] || continue
-            (cd "${dir}/bin" && zip -r "../../../../${dir}.zip" .)
+            (cd "${dir}/bin" && zip -r "../../../../release-archives/${dir}.zip" .)
           done
+          ls -la ../../../release-archives/
 
       - name: Versioned release (${{ steps.version.outputs.tag }})
         env:
@@ -59,8 +61,8 @@ jobs:
             --notes "Series fork of opencode ${{ steps.version.outputs.upstream }} with image rendering support." \
             2>/dev/null || true
           gh release upload "${TAG}" \
-            packages/opencode/dist/*.tar.gz \
-            packages/opencode/dist/*.zip \
+            release-archives/*.tar.gz \
+            release-archives/*.zip \
             --clobber
 
       - name: Rolling release (series-latest)
@@ -75,6 +77,6 @@ jobs:
             --latest \
             2>/dev/null || true
           gh release upload series-latest \
-            packages/opencode/dist/*.tar.gz \
-            packages/opencode/dist/*.zip \
+            release-archives/*.tar.gz \
+            release-archives/*.zip \
             --clobber

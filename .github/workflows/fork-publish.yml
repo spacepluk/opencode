@@ -1,0 +1,52 @@
+name: fork-publish
+
+on:
+  push:
+    branches:
+      - series
+  workflow_dispatch:
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
+permissions:
+  contents: write
+
+jobs:
+  build-cli:
+    runs-on: ubuntu-latest
+    if: github.repository != 'anomalyco/opencode'
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - uses: ./.github/actions/setup-bun
+
+      - name: Resolve version
+        id: version
+        run: |
+          VERSION=$(node -p "require('./packages/opencode/package.json').version")-${GITHUB_REF_NAME}
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build CLI
+        run: ./packages/opencode/script/build.ts
+        env:
+          OPENCODE_VERSION: ${{ steps.version.outputs.version }}
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd packages/opencode
+          VERSION="${{ steps.version.outputs.version }}"
+          for dir in dist/opencode-linux*; do
+            tar -czf "dist/$(basename $dir).tar.gz" -C "$dir/bin" .
+          done
+          for dir in dist/opencode-darwin* dist/opencode-windows*; do
+            [ -d "$dir" ] && (cd "$dir/bin" && zip -r "../../$(basename $dir).zip" .)
+          done
+          SHA=$(git rev-parse HEAD)
+          gh release delete "v${VERSION}" --cleanup-tag --yes 2>/dev/null || true
+          gh release create "v${VERSION}" dist/*.zip dist/*.tar.gz --title "v${VERSION}" --target "$SHA" --notes "Built from ${SHA::7} on ${GITHUB_REF_NAME}"
+          git tag -f "${GITHUB_REF_NAME}-latest" "$SHA"
+          git push origin "${GITHUB_REF_NAME}-latest" --force

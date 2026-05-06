@@ -343,14 +343,13 @@ function applyCaching(msgs: ModelMessage[], model: Provider.Model, extendedTTL?:
   const system = msgs.filter((msg) => msg.role === "system").slice(0, 2)
   const final = msgs.filter((msg) => msg.role !== "system").slice(-2)
 
-  // Use 1h cache TTL on first system block (2x write cost vs 1.25x for default 5-min)
-  const anthropicCache = extendedTTL ? { type: "ephemeral", ttl: "1h" } : { type: "ephemeral" }
+  const cacheControl = extendedTTL ? { type: "ephemeral", ttl: "1h" } : { type: "ephemeral" }
   const providerOptions = {
     anthropic: {
-      cacheControl: { type: "ephemeral" },
+      cacheControl,
     },
     openrouter: {
-      cacheControl: { type: "ephemeral" },
+      cacheControl,
     },
     bedrock: {
       cachePoint: { type: "default" },
@@ -367,9 +366,6 @@ function applyCaching(msgs: ModelMessage[], model: Provider.Model, extendedTTL?:
   }
 
   for (const msg of unique([...system, ...final])) {
-    const options = msg === system[0]
-      ? { ...providerOptions, anthropic: { cacheControl: anthropicCache } }
-      : providerOptions
     const useMessageLevelOptions =
       model.providerID === "anthropic" ||
       model.providerID.includes("bedrock") ||
@@ -384,12 +380,12 @@ function applyCaching(msgs: ModelMessage[], model: Provider.Model, extendedTTL?:
         lastContent.type !== "tool-approval-request" &&
         lastContent.type !== "tool-approval-response"
       ) {
-        lastContent.providerOptions = mergeDeep(lastContent.providerOptions ?? {}, options)
+        lastContent.providerOptions = mergeDeep(lastContent.providerOptions ?? {}, providerOptions)
         continue
       }
     }
 
-    msg.providerOptions = mergeDeep(msg.providerOptions ?? {}, options)
+    msg.providerOptions = mergeDeep(msg.providerOptions ?? {}, providerOptions)
   }
 
   return msgs

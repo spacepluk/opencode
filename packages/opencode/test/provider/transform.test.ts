@@ -2060,21 +2060,10 @@ describe("ProviderTransform.message - first system block gets 1h TTL when flag s
     expect(result[0].providerOptions.anthropic.cacheControl).toEqual({ type: "ephemeral" })
   })
 
-  test("second system block always gets default ephemeral TTL", () => {
+  test("all cache breakpoints get 1h TTL when extendedTTL is true", () => {
     const msgs = [
       { role: "system", content: "Block 1" },
       { role: "system", content: "Block 2" },
-      { role: "user", content: "Hello" },
-    ] as any[]
-
-    const result = ProviderTransform.message(msgs, anthropicModel, { extendedTTL: true }) as any[]
-
-    expect(result[1].providerOptions.anthropic.cacheControl).toEqual({ type: "ephemeral" })
-  })
-
-  test("conversation messages get default ephemeral TTL even with extendedTTL", () => {
-    const msgs = [
-      { role: "system", content: "System" },
       { role: "user", content: "Hello" },
       { role: "assistant", content: "Hi" },
       { role: "user", content: "World" },
@@ -2082,8 +2071,9 @@ describe("ProviderTransform.message - first system block gets 1h TTL when flag s
 
     const result = ProviderTransform.message(msgs, anthropicModel, { extendedTTL: true }) as any[]
 
+    expect(result[1].providerOptions.anthropic.cacheControl).toEqual({ type: "ephemeral", ttl: "1h" })
     const last = result[result.length - 1]
-    expect(last.providerOptions.anthropic.cacheControl).toEqual({ type: "ephemeral" })
+    expect(last.providerOptions.anthropic.cacheControl).toEqual({ type: "ephemeral", ttl: "1h" })
   })
 })
 

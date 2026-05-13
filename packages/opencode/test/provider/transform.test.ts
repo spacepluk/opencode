@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
+import { Flag } from "@opencode-ai/core/flag/flag"
 import { ProviderTransform } from "@/provider/transform"
 import { ModelID, ProviderID } from "../../src/provider/schema"
 
@@ -355,6 +356,76 @@ describe("ProviderTransform.options - gateway", () => {
         caching: "auto",
       },
     })
+  })
+})
+
+describe("ProviderTransform.providerOptions - cache 1h env", () => {
+  const original = {
+    cache1h: Flag.OPENCODE_EXPERIMENTAL_CACHE_1H_TTL,
+    cache1hSysOnly: Flag.OPENCODE_EXPERIMENTAL_CACHE_1H_TTL_SYSONLY,
+  }
+  const model = {
+    id: "anthropic/claude-3-5-sonnet",
+    providerID: "anthropic",
+    api: {
+      id: "claude-3-5-sonnet-20241022",
+      url: "https://api.anthropic.com",
+      npm: "@ai-sdk/anthropic",
+    },
+    name: "Claude 3.5 Sonnet",
+    capabilities: {
+      temperature: true,
+      reasoning: false,
+      attachment: true,
+      toolcall: true,
+      input: { text: true, audio: false, image: true, video: false, pdf: true },
+      output: { text: true, audio: false, image: false, video: false, pdf: false },
+      interleaved: false,
+    },
+    cost: { input: 0.003, output: 0.015, cache: { read: 0.0003, write: 0.00375 } },
+    limit: { context: 200000, output: 8192 },
+    status: "active",
+    options: {},
+    headers: {},
+  } as any
+
+  afterEach(() => {
+    Flag.OPENCODE_EXPERIMENTAL_CACHE_1H_TTL = original.cache1h
+    Flag.OPENCODE_EXPERIMENTAL_CACHE_1H_TTL_SYSONLY = original.cache1hSysOnly
+  })
+
+  test("uses request-level 1h cache control for anthropic when env flag is enabled", () => {
+    Flag.OPENCODE_EXPERIMENTAL_CACHE_1H_TTL = true
+    Flag.OPENCODE_EXPERIMENTAL_CACHE_1H_TTL_SYSONLY = false
+
+    const result = ProviderTransform.providerOptions(model, {})
+
+    expect(result).toEqual({
+      anthropic: {
+        cacheControl: {
+          type: "ephemeral",
+          ttl: "1h",
+        },
+      },
+    })
+  })
+
+  test("does not set request-level cache control when sysonly is enabled", () => {
+    Flag.OPENCODE_EXPERIMENTAL_CACHE_1H_TTL = true
+    Flag.OPENCODE_EXPERIMENTAL_CACHE_1H_TTL_SYSONLY = true
+
+    const result = ProviderTransform.providerOptions(model, {})
+
+    expect(result).toEqual({ anthropic: {} })
+  })
+
+  test("allows extendedTTL=false to opt out of env-driven request caching", () => {
+    Flag.OPENCODE_EXPERIMENTAL_CACHE_1H_TTL = true
+    Flag.OPENCODE_EXPERIMENTAL_CACHE_1H_TTL_SYSONLY = false
+
+    const result = ProviderTransform.providerOptions(model, { extendedTTL: false })
+
+    expect(result).toEqual({ anthropic: {} })
   })
 })
 
@@ -2186,6 +2257,62 @@ describe("ProviderTransform.message - first system block gets 1h TTL when flag s
     expect(result[1].providerOptions.anthropic.cacheControl).toEqual({ type: "ephemeral", ttl: "1h" })
     const last = result[result.length - 1]
     expect(last.providerOptions.anthropic.cacheControl).toEqual({ type: "ephemeral", ttl: "1h" })
+  })
+
+  test("env flag uses automatic caching instead of explicit cache breakpoints", () => {
+    const original = {
+      cache1h: Flag.OPENCODE_EXPERIMENTAL_CACHE_1H_TTL,
+      cache1hSysOnly: Flag.OPENCODE_EXPERIMENTAL_CACHE_1H_TTL_SYSONLY,
+    }
+    Flag.OPENCODE_EXPERIMENTAL_CACHE_1H_TTL = true
+    Flag.OPENCODE_EXPERIMENTAL_CACHE_1H_TTL_SYSONLY = false
+
+    try {
+      const msgs = [
+        { role: "system", content: "Block 1" },
+        { role: "system", content: "Block 2" },
+        { role: "user", content: "Hello" },
+        { role: "assistant", content: "Hi" },
+        { role: "user", content: "World" },
+      ] as any[]
+
+      const result = ProviderTransform.message(msgs, anthropicModel, {}) as any[]
+
+      expect(result[0].providerOptions).toBeUndefined()
+      expect(result[1].providerOptions).toBeUndefined()
+      expect(result[4].providerOptions).toBeUndefined()
+    } finally {
+      Flag.OPENCODE_EXPERIMENTAL_CACHE_1H_TTL = original.cache1h
+      Flag.OPENCODE_EXPERIMENTAL_CACHE_1H_TTL_SYSONLY = original.cache1hSysOnly
+    }
+  })
+
+  test("sysonly keeps 1h TTL on system blocks only", () => {
+    const original = {
+      cache1h: Flag.OPENCODE_EXPERIMENTAL_CACHE_1H_TTL,
+      cache1hSysOnly: Flag.OPENCODE_EXPERIMENTAL_CACHE_1H_TTL_SYSONLY,
+    }
+    Flag.OPENCODE_EXPERIMENTAL_CACHE_1H_TTL = true
+    Flag.OPENCODE_EXPERIMENTAL_CACHE_1H_TTL_SYSONLY = true
+
+    try {
+      const msgs = [
+        { role: "system", content: "Block 1" },
+        { role: "system", content: "Block 2" },
+        { role: "user", content: "Hello" },
+        { role: "assistant", content: "Hi" },
+        { role: "user", content: "World" },
+      ] as any[]
+
+      const result = ProviderTransform.message(msgs, anthropicModel, {}) as any[]
+
+      expect(result[0].providerOptions.anthropic.cacheControl).toEqual({ type: "ephemeral", ttl: "1h" })
+      expect(result[1].providerOptions.anthropic.cacheControl).toEqual({ type: "ephemeral", ttl: "1h" })
+      expect(result[4].providerOptions.anthropic.cacheControl).toEqual({ type: "ephemeral" })
+    } finally {
+      Flag.OPENCODE_EXPERIMENTAL_CACHE_1H_TTL = original.cache1h
+      Flag.OPENCODE_EXPERIMENTAL_CACHE_1H_TTL_SYSONLY = original.cache1hSysOnly
+    }
   })
 })
 

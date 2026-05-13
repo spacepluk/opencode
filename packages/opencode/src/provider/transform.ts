@@ -1,5 +1,5 @@
 import type { ModelMessage, ToolResultPart } from "ai"
-import { mergeDeep, unique } from "remeda"
+import { mergeDeep } from "remeda"
 import type { JSONSchema7 } from "@ai-sdk/provider"
 import type { JSONSchema } from "zod/v4/core"
 import type * as Provider from "./provider"
@@ -122,6 +122,8 @@ function normalizeMessages(
         }
         return msg
     }
+
+    return msg
   })
 
   // Anthropic rejects messages with empty content - filter out empty string messages
@@ -339,54 +341,57 @@ function normalizeMessages(
   return msgs
 }
 
-function applyCaching(msgs: ModelMessage[], model: Provider.Model, extendedTTL?: boolean): ModelMessage[] {
+function applyCaching(msgs: ModelMessage[], model: Provider.Model, extendedTTL?: boolean, systemOnlyTTL?: boolean): ModelMessage[] {
   const system = msgs.filter((msg) => msg.role === "system").slice(0, 2)
   const final = msgs.filter((msg) => msg.role !== "system").slice(-2)
-
-  const cacheControl = extendedTTL ? { type: "ephemeral", ttl: "1h" } : { type: "ephemeral" }
-  const providerOptions = {
-    anthropic: {
-      cacheControl,
-    },
-    openrouter: {
-      cacheControl,
-    },
-    bedrock: {
-      cachePoint: { type: "default" },
-    },
-    openaiCompatible: {
-      cache_control: { type: "ephemeral" },
-    },
-    copilot: {
-      copilot_cache_control: { type: "ephemeral" },
-    },
-    alibaba: {
-      cacheControl: { type: "ephemeral" },
-    },
-  }
-
-  for (const msg of unique([...system, ...final])) {
-    const useMessageLevelOptions =
-      model.providerID === "anthropic" ||
-      model.providerID.includes("bedrock") ||
-      model.api.npm === "@ai-sdk/amazon-bedrock"
-    const shouldUseContentOptions = !useMessageLevelOptions && Array.isArray(msg.content) && msg.content.length > 0
-
-    if (shouldUseContentOptions) {
-      const lastContent = msg.content[msg.content.length - 1]
-      if (
-        lastContent &&
-        typeof lastContent === "object" &&
-        lastContent.type !== "tool-approval-request" &&
-        lastContent.type !== "tool-approval-response"
-      ) {
-        lastContent.providerOptions = mergeDeep(lastContent.providerOptions ?? {}, providerOptions)
-        continue
-      }
+  const apply = (list: ModelMessage[], cacheControl: { type: "ephemeral"; ttl?: "1h" }) => {
+    const providerOptions = {
+      anthropic: {
+        cacheControl,
+      },
+      openrouter: {
+        cacheControl,
+      },
+      bedrock: {
+        cachePoint: { type: "default" },
+      },
+      openaiCompatible: {
+        cache_control: { type: "ephemeral" },
+      },
+      copilot: {
+        copilot_cache_control: { type: "ephemeral" },
+      },
+      alibaba: {
+        cacheControl: { type: "ephemeral" },
+      },
     }
 
-    msg.providerOptions = mergeDeep(msg.providerOptions ?? {}, providerOptions)
+    for (const msg of list) {
+      const useMessageLevelOptions =
+        model.providerID === "anthropic" ||
+        model.providerID.includes("bedrock") ||
+        model.api.npm === "@ai-sdk/amazon-bedrock"
+      const shouldUseContentOptions = !useMessageLevelOptions && Array.isArray(msg.content) && msg.content.length > 0
+
+      if (shouldUseContentOptions) {
+        const lastContent = msg.content[msg.content.length - 1]
+        if (
+          lastContent &&
+          typeof lastContent === "object" &&
+          lastContent.type !== "tool-approval-request" &&
+          lastContent.type !== "tool-approval-response"
+        ) {
+          lastContent.providerOptions = mergeDeep(lastContent.providerOptions ?? {}, providerOptions)
+          continue
+        }
+      }
+
+      msg.providerOptions = mergeDeep(msg.providerOptions ?? {}, providerOptions)
+    }
   }
+
+  apply(system, extendedTTL || systemOnlyTTL ? { type: "ephemeral", ttl: "1h" } : { type: "ephemeral" })
+  apply(final, extendedTTL ? { type: "ephemeral", ttl: "1h" } : { type: "ephemeral" })
 
   return msgs
 }
@@ -432,6 +437,12 @@ function unsupportedParts(msgs: ModelMessage[], model: Provider.Model): ModelMes
 export function message(msgs: ModelMessage[], model: Provider.Model, options: Record<string, unknown>) {
   msgs = unsupportedParts(msgs, model)
   msgs = normalizeMessages(msgs, model, options)
+  const extendedTTL = options.extendedTTL as boolean | undefined
+  const automaticCacheControl =
+    model.api.npm === "@ai-sdk/anthropic" &&
+    extendedTTL === undefined &&
+    Flag.OPENCODE_EXPERIMENTAL_CACHE_1H_TTL &&
+    !Flag.OPENCODE_EXPERIMENTAL_CACHE_1H_TTL_SYSONLY
   if (
     (model.providerID === "anthropic" ||
       model.providerID === "google-vertex-anthropic" ||
@@ -443,7 +454,14 @@ export function message(msgs: ModelMessage[], model: Provider.Model, options: Re
       model.api.npm === "@ai-sdk/alibaba") &&
     model.api.npm !== "@ai-sdk/gateway"
   ) {
-    msgs = applyCaching(msgs, model, (options.extendedTTL as boolean) ?? Flag.OPENCODE_EXPERIMENTAL_CACHE_1H_TTL)
+    if (!automaticCacheControl) {
+      msgs = applyCaching(
+        msgs,
+        model,
+        extendedTTL ?? (!Flag.OPENCODE_EXPERIMENTAL_CACHE_1H_TTL_SYSONLY && Flag.OPENCODE_EXPERIMENTAL_CACHE_1H_TTL),
+        extendedTTL === undefined && Flag.OPENCODE_EXPERIMENTAL_CACHE_1H_TTL_SYSONLY,
+      )
+    }
   }
 
   // Remap providerOptions keys from stored providerID to expected SDK key
@@ -1229,6 +1247,19 @@ const SLUG_OVERRIDES: Record<string, string> = {
 }
 
 export function providerOptions(model: Provider.Model, options: { [x: string]: any }) {
+  const resultOptions = { ...options }
+  delete resultOptions.extendedTTL
+
+  if (
+    model.api.npm === "@ai-sdk/anthropic" &&
+    options.extendedTTL === undefined &&
+    Flag.OPENCODE_EXPERIMENTAL_CACHE_1H_TTL &&
+    !Flag.OPENCODE_EXPERIMENTAL_CACHE_1H_TTL_SYSONLY &&
+    resultOptions.cacheControl === undefined
+  ) {
+    resultOptions.cacheControl = { type: "ephemeral", ttl: "1h" }
+  }
+
   if (model.api.npm === "@ai-sdk/gateway") {
     // Gateway providerOptions are split across two namespaces:
     // - `gateway`: gateway-native routing/caching controls (order, only, byok, etc.)
@@ -1238,8 +1269,8 @@ export function providerOptions(model: Provider.Model, options: { [x: string]: a
     const i = model.api.id.indexOf("/")
     const rawSlug = i > 0 ? model.api.id.slice(0, i) : undefined
     const slug = rawSlug ? (SLUG_OVERRIDES[rawSlug] ?? rawSlug) : undefined
-    const gateway = options.gateway
-    const rest = Object.fromEntries(Object.entries(options).filter(([k]) => k !== "gateway"))
+    const gateway = resultOptions.gateway
+    const rest = Object.fromEntries(Object.entries(resultOptions).filter(([k]) => k !== "gateway"))
     const has = Object.keys(rest).length > 0
 
     const result: Record<string, any> = {}
@@ -1273,9 +1304,9 @@ export function providerOptions(model: Provider.Model, options: { [x: string]: a
   // providerOptions["openai"], but OpenAIResponsesLanguageModel checks
   // "azure" first. Pass both so model options work on either code path.
   if (model.api.npm === "@ai-sdk/azure") {
-    return { openai: options, azure: options }
+    return { openai: resultOptions, azure: resultOptions }
   }
-  return { [key]: options }
+  return { [key]: resultOptions }
 }
 
 export function maxOutputTokens(model: Provider.Model): number {
